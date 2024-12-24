@@ -1,0 +1,96 @@
+name: Auto Label Issues
+on:
+  issues:
+    types: [opened, edited]
+
+jobs:
+  label_issue:
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    
+    steps:
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install openai requests
+
+      - name: Label Issue
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          import os
+          import json
+          from openai import OpenAI
+          import requests
+
+          # Configure OpenAI
+          # openai.api_key = os.getenv('OPENAI_API_KEY')
+          client = OpenAI(
+              api_key=os.environ.get('OPENAI_API_KEY'),  # This is the default and can be omitted
+          )
+          
+          # Get event data
+          with open(os.getenv('GITHUB_EVENT_PATH')) as f:
+              event = json.load(f)
+              
+          # Extract issue details
+          issue = event['issue']
+          repo = event['repository']['full_name']
+          
+          # Get repo labels
+          headers = {
+              'Authorization': f"Bearer {os.getenv('GITHUB_TOKEN')}",
+              'Accept': 'application/vnd.github.v3+json'
+          }
+          labels_url = f"https://api.github.com/repos/{repo}/labels"
+          labels = requests.get(labels_url, headers=headers).json()
+          label_names = [label['name'] for label in labels]
+          label_info = [f"{l['name']}: {l.get('description', 'No description')}" for l in labels]
+          
+          # Classify with GPT
+          prompt = f"""
+          Classify this GitHub issue using the available labels and their descriptions. Return only the label names as a comma-separated list. 
+          Note that an issue can't have both a bug and enhancement label.
+          
+          Available labels and their descriptions:
+          {chr(10).join(label_info)}
+          
+          Issue Title: {issue['title']}
+          Issue Body: {issue.get('body', '')}
+          
+          Return only the label names, maximum 2 labels.
+          """
+          
+          response = client.chat.completions.create(
+              model="gpt-4o-mini",
+              messages=[
+                  {"role": "system", "content": "You are a GitHub issue classifier. Return only exact label names."},
+                  {"role": "user", "content": prompt}
+              ],
+              temperature=0.3,
+              max_tokens=50
+          )
+          
+          # Process response
+          suggested_labels = [
+              label.strip() 
+              for label in response.choices[0].message.content.split(',')
+              if label.strip() in label_names
+          ]
+          
+          # Apply labels
+          if suggested_labels:
+              label_url = f"https://api.github.com/repos/{repo}/issues/{issue['number']}/labels"
+              response = requests.post(label_url, headers=headers, json={'labels': suggested_labels})
+              response.raise_for_status()
+              print(f"Applied labels: {', '.join(suggested_labels)}")
+          else:
+              print("No matching labels found")
+        shell: python
