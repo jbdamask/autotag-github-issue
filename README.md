@@ -21,7 +21,8 @@ __3. Check it in:__
 * git commit -m "Adding LLM-based issue tagger"
 * git push origin main
 
-__4. Now add or edit an issue. After a few seconds you'll see new labels (hopefully)__
+# Running 
+Add or edit an issue in your repo. Refresh after a few seconds and you'll see labels applied.
 
 # Caveats
 * LLMs aren't perfect. It may not always get the labels right.
